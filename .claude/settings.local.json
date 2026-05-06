@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Claude_Preview__preview_start",
+      "Bash(cd \"C:\\\\\\\\Users\\\\\\\\Amith B\\\\\\\\OneDrive\\\\\\\\Desktop\\\\\\\\bridge to education\\\\\\\\backend\")",
+      "Bash(pip install *)",
+      "Bash(grep -n \"const lines = text.split\" \"C:\\\\\\\\Users\\\\\\\\Amith B\\\\\\\\OneDrive\\\\\\\\Desktop\\\\\\\\bridge to education\\\\\\\\frontend\\\\\\\\src\\\\\\\\components\\\\\\\\Student\\\\\\\\AITutor.jsx\")",
+      "Bash(python manage.py shell -c ' *)",
+      "Bash(rm -f users/migrations/0001_initial.py users/migrations/0002_alter_user_groups_alter_user_user_permissions.py ai_tutor/migrations/0001_initial.py doubts/migrations/0001_initial.py notifications/migrations/0001_initial.py quizzes/migrations/0001_initial.py quizzes/migrations/0002_initial.py resources/migrations/0001_initial.py)",
+      "Bash(python manage.py makemigrations users)",
+      "Bash(python manage.py makemigrations)",
+      "Bash(python manage.py migrate)",
+      "Bash(python manage.py check)"
+    ]
+  }
+}
