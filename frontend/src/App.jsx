@@ -9,6 +9,7 @@ import { AITutor } from './components/Student/AITutor';
 import { ResourceBrowser } from './components/Student/ResourceBrowser';
 import { QuizModule } from './components/Student/QuizModule';
 import { DoubtChat } from './components/Student/DoubtChat';
+import { StudyHub } from './components/Student/StudyHub';
 import { OfflineIndicator } from './components/Student/OfflineIndicator';
 import { OfflineResourceBrowser } from './components/Student/OfflineResourceBrowser';
 import { OfflineQuizTaker } from './components/Student/OfflineQuizTaker';
@@ -320,6 +321,7 @@ function App() {
 
           <Route path="/dashboard" element={<PrivateRoute><RoleBasedDashboard /></PrivateRoute>} />
           <Route path="/tutor" element={<PrivateRoute><AITutor /></PrivateRoute>} />
+          <Route path="/study-hub" element={<PrivateRoute><StudyHub /></PrivateRoute>} />
           <Route path="/resources" element={<PrivateRoute><ResourceBrowser /></PrivateRoute>} />
           <Route path="/quizzes" element={<PrivateRoute><QuizModule /></PrivateRoute>} />
           <Route path="/doubts" element={<PrivateRoute><DoubtChat /></PrivateRoute>} />
