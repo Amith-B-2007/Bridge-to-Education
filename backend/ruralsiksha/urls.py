@@ -28,5 +28,6 @@ urlpatterns = [
         path('ai-tutor/', include('ai_tutor.urls')),
         path('doubts/', include('doubts.urls')),
         path('notifications/', include('notifications.urls')),
+        path('study-hub/', include('study_hub.urls')),
     ])),
 ]

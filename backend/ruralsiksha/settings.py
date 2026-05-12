@@ -55,6 +55,7 @@ INSTALLED_APPS = [
     'ai_tutor',
     'doubts',
     'notifications',
+    'study_hub',
 ]
 
 MIDDLEWARE = [

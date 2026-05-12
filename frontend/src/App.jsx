@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { FirebaseProvider } from './context/FirebaseContext';
 import { PrivateRoute } from './components/Auth/PrivateRoute';
 import { LoginForm } from './components/Auth/LoginForm';
 import { RegisterForm } from './components/Auth/RegisterForm';
@@ -312,9 +313,10 @@ function RoleBasedDashboard() {
 function App() {
   return (
     <Router>
-      <AuthProvider>
-        <OfflineIndicator />
-        <Routes>
+      <FirebaseProvider>
+        <AuthProvider>
+          <OfflineIndicator />
+          <Routes>
           <Route path="/" element={<ProfessionalHomePage />} />
           <Route path="/login" element={<LoginForm />} />
           <Route path="/register" element={<RegisterForm />} />
@@ -334,6 +336,7 @@ function App() {
           <Route path="/offline/quiz" element={<PrivateRoute><OfflineQuizPage /></PrivateRoute>} />
         </Routes>
       </AuthProvider>
+      </FirebaseProvider>
     </Router>
   );
 }

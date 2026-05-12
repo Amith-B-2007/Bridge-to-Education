@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../utils/api';
+import { subscribeToQuizzes, getQuizById, recordQuizAttempt } from '../../services/firestoreService';
 
 const SUBJECT_STYLES = {
   maths:         { color: '#2563eb', bg: '#eff6ff', badge: '#bfdbfe' },
@@ -43,20 +43,17 @@ export const QuizModule = () => {
   const [selectedGrade, setSelectedGrade] = useState(user?.grade || 5);
   const [quizMode, setQuizMode] = useState('chapter'); // 'chapter' | 'pyq'
 
-  useEffect(() => { fetchQuizzes(); }, [selectedGrade]);
-
-  const fetchQuizzes = async () => {
+  useEffect(() => {
     setLoading(true);
-    try {
-      const res = await api.get(`/quizzes/?grade=${selectedGrade}`);
-      setQuizzes(res.data.results || res.data || []);
-    } catch (e) {
-      console.error(e);
-      setQuizzes([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const unsubscribe = subscribeToQuizzes(
+      { grade: selectedGrade, subject: selectedSubject !== 'all' ? selectedSubject : undefined },
+      (items) => {
+        setQuizzes(items);
+        setLoading(false);
+      }
+    );
+    return () => unsubscribe?.();
+  }, [selectedGrade, selectedSubject]);
 
   // Split into chapter quizzes vs PYQ papers
   const pyqQuizzes = quizzes.filter(isPYQ);

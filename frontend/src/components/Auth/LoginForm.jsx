@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useFirebase } from '../../context/FirebaseContext';
 
 export const LoginForm = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, setAuthUser } = useAuth();
+  const { login: firebaseLogin } = useFirebase();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
@@ -16,10 +18,19 @@ export const LoginForm = () => {
     setLoading(true);
 
     try {
-      await login(username, password);
-      navigate('/dashboard');
+      // Try Firebase first
+      try {
+        const userData = await firebaseLogin(username, password);
+        setAuthUser(userData);
+        navigate('/dashboard');
+      } catch (firebaseErr) {
+        // Fall back to Django backend
+        console.log('Firebase login failed, trying backend...', firebaseErr.message);
+        await login(username, password);
+        navigate('/dashboard');
+      }
     } catch (err) {
-      setError(err.response?.data?.detail || 'Login failed');
+      setError(err.response?.data?.detail || err.message || 'Login failed');
     } finally {
       setLoading(false);
     }

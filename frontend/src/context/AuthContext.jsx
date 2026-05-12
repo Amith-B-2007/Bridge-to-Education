@@ -1,5 +1,6 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import api from '../utils/api';
+import { firebaseSignOut } from '../services/firebaseAuthService';
 
 const AuthContext = createContext();
 
@@ -16,11 +17,25 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const getStoredUser = () => {
+    try {
+      const raw = localStorage.getItem('currentUser');
+      return raw ? JSON.parse(raw) : null;
+    } catch (err) {
+      console.warn('Failed to parse stored currentUser', err);
+      return null;
+    }
+  };
+
   useEffect(() => {
     const token = localStorage.getItem('access_token');
     if (token) {
       fetchUserProfile();
     } else {
+      const storedUser = getStoredUser();
+      if (storedUser) {
+        setUser(storedUser);
+      }
       setLoading(false);
     }
   }, []);
@@ -49,6 +64,7 @@ export const AuthProvider = ({ children }) => {
       const { access, refresh, user: userData } = response.data;
       localStorage.setItem('access_token', access);
       localStorage.setItem('refresh_token', refresh);
+      localStorage.setItem('currentUser', JSON.stringify(userData));
       setUser(userData);
       return userData;
     } catch (err) {
@@ -68,6 +84,7 @@ export const AuthProvider = ({ children }) => {
       const { access, refresh, user: newUser } = response.data;
       localStorage.setItem('access_token', access);
       localStorage.setItem('refresh_token', refresh);
+      localStorage.setItem('currentUser', JSON.stringify(newUser));
       setUser(newUser);
       return newUser;
     } catch (err) {
@@ -77,10 +94,22 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await firebaseSignOut();
+    } catch (err) {
+      console.warn('Firebase sign-out failed:', err.message || err);
+    }
+
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
+    localStorage.removeItem('currentUser');
     setUser(null);
+  };
+
+  const setAuthUser = (userData) => {
+    localStorage.setItem('currentUser', JSON.stringify(userData));
+    setUser(userData);
   };
 
   const value = {
@@ -90,6 +119,7 @@ export const AuthProvider = ({ children }) => {
     login,
     register,
     logout,
+    setAuthUser,
     isAuthenticated: !!user,
   };
 

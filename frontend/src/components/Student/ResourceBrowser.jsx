@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../utils/api';
+import { subscribeToResources } from '../../services/firestoreService';
 
 /* ── subject catalogue ─────────────────────────────────────────────────── */
 const SUBJECTS = [
@@ -26,304 +26,109 @@ export const ResourceBrowser = () => {
   const navigate = useNavigate();
   const { user }  = useAuth();
 
-  const [grade,    setGrade]    = useState(user?.grade || 5);
-  const [subject,  setSubject]  = useState(null);
-  const [chapters, setChapters] = useState([]);
-  const [loadingCh, setLoadingCh] = useState(false);
-
-  const [activeChapter, setActiveChapter] = useState(null);
-  const [links,         setLinks]         = useState(null);
-  const [loadingLinks,  setLoadingLinks]  = useState(false);
-
-  /* quiz state */
-  const [quizMode,      setQuizMode]      = useState(false); // 'idle'|'loading'|'taking'|'done'
-  const [quizQuestions, setQuizQuestions] = useState([]);
-  const [quizSource,    setQuizSource]    = useState('');
+  const [grade, setGrade] = useState(user?.grade || 5);
+  const [subject, setSubject] = useState(null);
+  const [resources, setResources] = useState([]);
+  const [loadingResources, setLoadingResources] = useState(false);
 
   useEffect(() => {
-    if (!subject) return;
-    setChapters([]); setActiveChapter(null); setLinks(null);
-    setQuizMode(false);
-    loadChapters();
-  }, [grade, subject]);                        // eslint-disable-line
+    if (!subject) return undefined;
 
-  const loadChapters = async () => {
-    setLoadingCh(true);
-    try {
-      const r = await api.get('/resources/chapters-list/', {
-        params: { grade, subject: subject.value },
-      });
-      setChapters(r.data.chapters || []);
-    } catch { setChapters([]); }
-    finally   { setLoadingCh(false); }
-  };
+    setLoadingResources(true);
+    const unsubscribe = subscribeToResources({ grade, subject: subject.value }, (items) => {
+      setResources(items);
+      setLoadingResources(false);
+    });
 
-  const loadLinks = async (ch) => {
-    setActiveChapter(ch); setLinks(null); setQuizMode(false); setLoadingLinks(true);
-    try {
-      const r = await api.post('/resources/links/', {
-        grade, subject: subject.value,
-        chapter_number: ch.number, chapter_title: ch.title,
-      });
-      setLinks(r.data);
-    } catch { /* show retry */ }
-    finally { setLoadingLinks(false); }
-  };
+    return () => unsubscribe?.();
+  }, [grade, subject]);
 
-  const generateQuiz = async () => {
-    setQuizMode('loading'); setQuizQuestions([]);
-    try {
-      const r = await api.post('/quizzes/ai-generate/', {
-        grade, subject: subject.value,
-        chapter_title:  activeChapter.title,
-        chapter_number: activeChapter.number,
-        num_questions:  5,
-      });
-      setQuizQuestions(r.data.questions || []);
-      setQuizSource(r.data.source || '');
-      setQuizMode('taking');
-    } catch {
-      setQuizMode('idle');
-      alert('Could not generate quiz. Please try again.');
-    }
-  };
-
-  /* ── render quiz ───── */
-  if (subject && activeChapter && (quizMode === 'taking' || quizMode === 'done')) {
-    return (
-      <div className="prof-page-shell">
-        <PageHeader onBack={() => { setQuizMode('idle'); }} title="Quiz" />
-        <main className="prof-main">
-          <InlineQuiz
-            questions={quizQuestions}
-            source={quizSource}
-            chapterTitle={activeChapter.title}
-            grade={grade}
-            subjectLabel={subject.label}
-            onDone={() => setQuizMode('done')}
-            onBack={() => { setQuizMode('idle'); }}
-          />
-        </main>
-      </div>
-    );
-  }
-
-  /* ── step 1: pick subject ─── */
   if (!subject) {
     return (
       <div className="prof-page-shell">
         <PageHeader onBack={() => navigate('/dashboard')} title="Learning Resources" />
         <main className="prof-main">
-
-          {/* grade pills */}
-          <div style={{
-            background: '#fff', borderRadius: 14, padding: '20px 24px',
-            marginBottom: 24, boxShadow: '0 1px 4px rgba(0,0,0,.08)',
-          }}>
-            <p style={{ fontSize: 12, fontWeight: 700, color: '#64748b',
-                        letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 12 }}>
-              Select Grade
-            </p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <div className="prof-surface" style={{ marginBottom: 24 }}>
+            <p className="prof-section-subtitle">Choose a grade and subject to browse resources stored in Firebase.</p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 18 }}>
               {[1,2,3,4,5,6,7,8,9,10].map(g => (
-                <button key={g} onClick={() => setGrade(g)} style={{
-                  padding: '7px 18px', borderRadius: 999, fontSize: 14,
-                  fontWeight: 600, cursor: 'pointer', border: 'none',
-                  background: grade === g ? '#0891b2' : '#f1f5f9',
-                  color:      grade === g ? '#fff'    : '#475569',
-                  boxShadow:  grade === g ? '0 2px 8px rgba(8,145,178,.35)' : 'none',
-                  transition: 'all .15s',
-                }}>Grade {g}</button>
+                <button
+                  key={g}
+                  onClick={() => setGrade(g)}
+                  className={`px-4 py-2 rounded-full font-semibold transition ${grade === g ? 'bg-cyan-600 text-white shadow-lg' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                >
+                  Grade {g}
+                </button>
               ))}
             </div>
           </div>
 
-          <p style={{ fontSize: 16, fontWeight: 700, color: '#1e293b', marginBottom: 16 }}>
-            Choose a Subject
-          </p>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-            gap: 16,
-          }}>
-            {SUBJECTS.map(s => (
-              <button key={s.value} onClick={() => setSubject(s)} style={{
-                background: `linear-gradient(135deg, ${s.color}, ${s.dark})`,
-                color: '#fff', border: 'none', borderRadius: 16,
-                padding: '28px 22px', textAlign: 'left', cursor: 'pointer',
-                boxShadow: `0 4px 16px ${s.color}44`,
-                transition: 'transform .15s, box-shadow .15s',
-              }}
-                onMouseEnter={e => { e.currentTarget.style.transform='translateY(-3px)'; e.currentTarget.style.boxShadow=`0 8px 24px ${s.color}66`; }}
-                onMouseLeave={e => { e.currentTarget.style.transform=''; e.currentTarget.style.boxShadow=`0 4px 16px ${s.color}44`; }}
-              >
-                <div style={{ fontSize: 40, marginBottom: 12 }}>{s.icon}</div>
-                <div style={{ fontSize: 17, fontWeight: 700 }}>{s.label}</div>
-                <div style={{ fontSize: 13, opacity: .8, marginTop: 4 }}>Grade {grade}</div>
-              </button>
-            ))}
+          <div style={{ marginTop: 16 }}>
+            <p className="prof-section-title">Pick a Subject</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
+              {SUBJECTS.map(s => (
+                <button
+                  key={s.value}
+                  onClick={() => setSubject(s)}
+                  className="prof-surface hover:scale-[1.02] transition-transform"
+                  style={{
+                    background: `linear-gradient(135deg, ${s.color}, ${s.dark})`,
+                    color: '#fff', border: 'none', minHeight: 160,
+                    display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '22px 24px',
+                  }}
+                >
+                  <div style={{ fontSize: 40 }}>{s.icon}</div>
+                  <div>
+                    <div style={{ fontSize: 20, fontWeight: 800 }}>{s.label}</div>
+                    <div style={{ marginTop: 6, opacity: 0.9 }}>Grade {grade}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
         </main>
       </div>
     );
   }
 
-  /* ── step 2: chapter grid ─── */
-  if (!activeChapter) {
-    return (
-      <div className="prof-page-shell">
-        <PageHeader onBack={() => setSubject(null)} title={subject.label} />
-        <main className="prof-main">
-
-          {/* subject banner */}
-          <div style={{
-            background: `linear-gradient(135deg, ${subject.color}, ${subject.dark})`,
-            color: '#fff', borderRadius: 16, padding: '20px 24px',
-            marginBottom: 24, display: 'flex', alignItems: 'center', gap: 16,
-            boxShadow: `0 4px 20px ${subject.color}44`,
-          }}>
-            <span style={{ fontSize: 44 }}>{subject.icon}</span>
-            <div>
-              <div style={{ fontSize: 22, fontWeight: 800 }}>{subject.label}</div>
-              <div style={{ fontSize: 14, opacity: .85 }}>Grade {grade} · Click a chapter to open resources</div>
-            </div>
-          </div>
-
-          {loadingCh ? (
-            <Spinner />
-          ) : chapters.length === 0 ? (
-            <EmptyState text="No chapters found." />
-          ) : (
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-              gap: 14,
-            }}>
-              {chapters.map(ch => (
-                <ChapterCard key={ch.number} ch={ch} subject={subject} onClick={() => loadLinks(ch)} />
-              ))}
-            </div>
-          )}
-        </main>
-      </div>
-    );
-  }
-
-  /* ── step 3: resource links ─── */
   return (
     <div className="prof-page-shell">
-      <PageHeader onBack={() => { setActiveChapter(null); setLinks(null); }} title={subject.label} />
+      <PageHeader onBack={() => setSubject(null)} title={subject.label} />
       <main className="prof-main">
-
-        {/* breadcrumb */}
-        <div style={{ fontSize: 13, color: '#64748b', marginBottom: 16, display: 'flex', gap: 6, alignItems: 'center' }}>
-          <button onClick={() => setSubject(null)} style={linkBtn}>All Subjects</button>
-          <span>›</span>
-          <button onClick={() => { setActiveChapter(null); setLinks(null); }} style={linkBtn}>{subject.label}</button>
-          <span>›</span>
-          <span style={{ color: '#1e293b', fontWeight: 600 }}>Ch {activeChapter.number}: {activeChapter.title}</span>
-        </div>
-
-        {/* chapter hero */}
-        <div style={{
-          background: `linear-gradient(135deg, ${subject.color}, ${subject.dark})`,
-          color: '#fff', borderRadius: 16, padding: '22px 26px',
-          marginBottom: 24, boxShadow: `0 4px 20px ${subject.color}44`,
-        }}>
-          <div style={{ fontSize: 11, opacity: .75, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 4 }}>
-            Chapter {activeChapter.number}
+        <div className="prof-surface" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+          <div>
+            <h2 style={{ fontSize: 22, fontWeight: 700, color: '#0f3460' }}>{subject.label} · Grade {grade}</h2>
+            <p style={{ color: '#64748b', marginTop: 6 }}>Browse documents, videos and files uploaded to Firebase Storage.</p>
           </div>
-          <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 4 }}>{activeChapter.title}</div>
-          <div style={{ fontSize: 13, opacity: .8 }}>{subject.label} · Grade {grade}</div>
+          <button
+            onClick={() => navigate('/quizzes')}
+            className="prof-action-btn prof-action-btn-primary"
+            style={{ alignSelf: 'center' }}
+          >
+            View Quizzes
+          </button>
         </div>
 
-        {loadingLinks ? (
+        {loadingResources ? (
           <Spinner />
-        ) : links ? (
-          <>
-            <p style={{ fontSize: 15, fontWeight: 700, color: '#1e293b', marginBottom: 14 }}>
-              Study Resources
-            </p>
-
-            {/* 2-col resource cards */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-              gap: 14, marginBottom: 24,
-            }}>
-              <ResourceCard
-                icon="📄" label="OFFICIAL" labelColor="#ea580c" labelBg="#fff7ed"
-                title="NCERT Textbook"
-                desc="Official chapter PDF from ncert.nic.in"
-                btnLabel="Open NCERT PDF"
-                btnBg="#ea580c"
-                onClick={() => openLink(links.ncert_url)}
-              />
-              <ResourceCard
-                icon="🎥" label="VIDEO" labelColor="#dc2626" labelBg="#fef2f2"
-                title="Video Lesson"
-                desc={`Watch: "NCERT Class ${grade} ${subject.label} ${activeChapter.title}"`}
-                btnLabel="Watch on YouTube"
-                btnBg="#dc2626"
-                onClick={() => openLink(links.youtube_url)}
-              />
-              <ResourceCard
-                icon="🏫" label="PRACTICE" labelColor="#16a34a" labelBg="#f0fdf4"
-                title="Khan Academy"
-                desc="Interactive practice & step-by-step explanations"
-                btnLabel="Open Khan Academy"
-                btnBg="#16a34a"
-                onClick={() => openLink(links.khan_url)}
-              />
-              <ResourceCard
-                icon="🔍" label="NOTES" labelColor="#2563eb" labelBg="#eff6ff"
-                title="Study Notes"
-                desc="Search solved questions, notes & explanations"
-                btnLabel="Search Google"
-                btnBg="#2563eb"
-                onClick={() => openLink(links.google_url)}
-              />
-            </div>
-
-            {/* quiz CTA */}
-            <div style={{
-              background: '#f8fafc', border: '2px dashed #cbd5e1',
-              borderRadius: 16, padding: '24px 28px',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              flexWrap: 'wrap', gap: 16,
-            }}>
-              <div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: '#1e293b', marginBottom: 4 }}>
-                  📝 Test Your Understanding
-                </div>
-                <div style={{ fontSize: 13, color: '#64748b' }}>
-                  5 AI-generated questions on "{activeChapter.title}" — takes ~3 minutes
-                </div>
-              </div>
-              <button
-                onClick={generateQuiz}
-                disabled={quizMode === 'loading'}
-                style={{
-                  background: quizMode === 'loading'
-                    ? '#94a3b8' : `linear-gradient(135deg, ${subject.color}, ${subject.dark})`,
-                  color: '#fff', border: 'none', borderRadius: 10,
-                  padding: '12px 28px', fontSize: 15, fontWeight: 700,
-                  cursor: quizMode === 'loading' ? 'not-allowed' : 'pointer',
-                  boxShadow: quizMode === 'loading' ? 'none' : `0 4px 16px ${subject.color}55`,
-                  minWidth: 180, transition: 'all .15s',
-                }}
-              >
-                {quizMode === 'loading' ? '⏳ Generating…' : '🚀 Take Chapter Quiz'}
-              </button>
-            </div>
-          </>
+        ) : resources.length === 0 ? (
+          <EmptyState text="No resources found for this grade and subject yet." />
         ) : (
-          <div style={{ textAlign: 'center', padding: '60px 0' }}>
-            <p style={{ color: '#94a3b8', marginBottom: 16 }}>Could not load links. Check your connection.</p>
-            <button onClick={() => loadLinks(activeChapter)} style={{
-              background: '#0891b2', color: '#fff', border: 'none',
-              borderRadius: 8, padding: '10px 24px', cursor: 'pointer', fontWeight: 600,
-            }}>Retry</button>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {resources.map(resource => (
+              <ResourceCard
+                key={resource.id}
+                icon={resource.resourceType === 'video' ? '🎥' : resource.resourceType === 'image' ? '🖼️' : '📄'}
+                label={resource.resourceType?.toUpperCase() || 'PDF'}
+                labelColor="#0f3460"
+                labelBg="#e0f2fe"
+                title={resource.title || resource.description || 'Learning Resource'}
+                desc={resource.description || `${subject.label} resource for Grade ${grade}`}
+                btnLabel="Open Resource"
+                btnBg="#0f3460"
+                onClick={() => resource.resourceUrl && openLink(resource.resourceUrl)}
+              />
+            ))}
           </div>
         )}
       </main>

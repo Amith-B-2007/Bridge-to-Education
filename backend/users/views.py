@@ -127,3 +127,29 @@ class StudentDashboardView(APIView):
 
 from django.db import models
 
+
+class StudentListView(APIView):
+    """GET /api/users/students/ — returns all students with aggregate stats."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        students = Student.objects.all().select_related('user').order_by('-user__date_joined')
+        data = []
+        for student in students:
+            attempts = StudentQuizAttempt.objects.filter(student=student, is_submitted=True)
+            avg = attempts.aggregate(models.Avg('percentage'))['percentage__avg']
+            tutor_count = TutorSession.objects.filter(student=student).count()
+            data.append({
+                'id': student.id,
+                'username': student.user.username,
+                'name': student.user.get_full_name() or student.user.username,
+                'grade': student.grade,
+                'attendance': round(float(student.attendance or 0), 1),
+                'total_quiz_attempts': student.total_quiz_attempts,
+                'avg_score': round(float(avg), 1) if avg else 0,
+                'school': student.user.school_name or '',
+                'subjects': student.subjects_interested or '',
+                'tutor_sessions': tutor_count,
+            })
+        return Response({'students': data, 'count': len(data)})
+

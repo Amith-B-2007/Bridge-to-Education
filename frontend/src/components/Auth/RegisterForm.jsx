@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useFirebase } from '../../context/FirebaseContext';
 
 export const RegisterForm = () => {
   const [formData, setFormData] = useState({
@@ -17,7 +18,8 @@ export const RegisterForm = () => {
   });
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
-  const { register } = useAuth();
+  const { register, setAuthUser } = useAuth();
+  const { signup: firebaseSignup } = useFirebase();
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -58,7 +60,31 @@ export const RegisterForm = () => {
         userData.grade = parseInt(formData.grade);
       }
 
-      await register(userData);
+      let firebaseUserData = null;
+      try {
+        firebaseUserData = await firebaseSignup(formData.email, formData.password, `${formData.first_name} ${formData.last_name}`, formData.role);
+        setAuthUser(firebaseUserData);
+      } catch (firebaseErr) {
+        console.warn('Firebase signup failed, trying backend only:', firebaseErr.message || firebaseErr);
+      }
+
+      try {
+        await register(userData);
+      } catch (backendErr) {
+        console.warn('Backend registration failed:', backendErr.message || backendErr);
+      }
+
+      if (!firebaseUserData) {
+        const storedUser = localStorage.getItem('currentUser');
+        if (!storedUser) {
+          setAuthUser({
+            email: formData.email,
+            displayName: `${formData.first_name} ${formData.last_name}`,
+            role: formData.role,
+          });
+        }
+      }
+
       navigate('/dashboard');
     } catch (err) {
       console.error('Registration error:', err);

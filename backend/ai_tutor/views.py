@@ -1,123 +1,108 @@
-from rest_framework import status, viewsets
+"""
+AI Tutor views - chapter-scoped chat.
+
+The system prompt tells the AI to ONLY discuss the specific chapter.
+"""
+from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.http import StreamingHttpResponse
-from .models import TutorSession, SessionMessage, ConversationMetrics
-from .serializers import (
-    TutorSessionSerializer, CreateTutorSessionSerializer,
-    SendMessageSerializer
-)
-from .ollama_client import OllamaClient
 import json
-import logging
 
-logger = logging.getLogger(__name__)
-ollama_client = OllamaClient()
+from common.ollama import chat
+from .models import TutorSession, SessionMessage
+from .serializers import TutorSessionSerializer
+
+LANGUAGE_NAMES = {
+    "en": "English", "hi": "Hindi", "ta": "Tamil", "te": "Telugu",
+    "bn": "Bengali", "kn": "Kannada", "mr": "Marathi",
+}
+
+
+def build_tutor_system_prompt(grade, syllabus, subject, chapter, language):
+    """The all-important guard: keeps the AI on-topic for one chapter."""
+    lang = LANGUAGE_NAMES.get(language, "English")
+    return f"""You are a kind and patient tutor for an Indian {grade}th grade student.
+You are following the {syllabus} syllabus.
+You ONLY answer questions about this specific chapter:
+    Subject: {subject}
+    Chapter: {chapter}
+
+RULES:
+1. Reply ONLY in {lang}.
+2. If the student asks about anything OUTSIDE this chapter, gently say:
+   "That's a great question! But let's focus on '{chapter}' for now."
+3. Use simple words and Indian examples.
+4. Break down hard ideas into small steps.
+5. Be encouraging - praise effort.
+6. Keep replies under 200 words unless asked for more detail.
+"""
+
 
 class TutorSessionViewSet(viewsets.ModelViewSet):
+    """
+    API endpoints:
+        GET    /api/ai-tutor/sessions/             list my sessions
+        POST   /api/ai-tutor/sessions/             create a new chapter session
+        GET    /api/ai-tutor/sessions/{id}/        get one session with messages
+        POST   /api/ai-tutor/sessions/{id}/send_message/   send message + stream reply
+    """
+
     serializer_class = TutorSessionSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return TutorSession.objects.filter(student=self.request.user.student_profile)
+        if hasattr(self.request.user, "student_profile"):
+            return TutorSession.objects.filter(
+                student=self.request.user.student_profile, is_active=True
+            )
+        return TutorSession.objects.none()
 
-    def create(self, request, *args, **kwargs):
-        serializer = CreateTutorSessionSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
-        student = request.user.student_profile
-        session = TutorSession.objects.create(
-            student=student,
-            subject=serializer.validated_data['subject'],
-            language=serializer.validated_data.get('language', 'en'),
-            title=f"{serializer.validated_data['subject']} Session"
-        )
-        
-        # Initialize metrics
-        ConversationMetrics.objects.create(session=session)
-        
-        return Response(
-            TutorSessionSerializer(session).data,
-            status=status.HTTP_201_CREATED
-        )
+    def perform_create(self, serializer):
+        serializer.save(student=self.request.user.student_profile)
 
-    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    @action(detail=True, methods=["post"], url_path="send_message")
     def send_message(self, request, pk=None):
+        """Streams the AI reply back chunk by chunk (Server-Sent Events)."""
         session = self.get_object()
-        serializer = SendMessageSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
-        message_text = serializer.validated_data['message']
-        
-        # Save student message
-        SessionMessage.objects.create(
-            session=session,
-            role='student',
-            content=message_text
+        message_text = request.data.get("message", "").strip()
+        if not message_text:
+            return Response({"error": "Message is required"}, status=400)
+
+        # 1. Save student's message
+        SessionMessage.objects.create(session=session, role="student", content=message_text)
+
+        # 2. Build conversation history for the AI
+        history = []
+        for m in session.messages.all():
+            history.append({
+                "role": "user" if m.role == "student" else "assistant",
+                "content": m.content,
+            })
+
+        system_prompt = build_tutor_system_prompt(
+            grade=session.grade,
+            syllabus=session.syllabus,
+            subject=session.subject,
+            chapter=session.chapter,
+            language=session.language,
         )
-        
-        # Get conversation history
-        messages = SessionMessage.objects.filter(session=session).order_by('created_at')
-        chat_history = [
-            {'role': msg.role, 'content': msg.content}
-            for msg in messages[:-1]  # Exclude the message we just added
-        ]
-        
-        # Stream response from Ollama
+
+        # 3. Stream the reply
         def event_stream():
+            full = ""
             try:
-                response = ollama_client.query(
-                    chat_history,
-                    session.student.grade,
-                    session.subject,
-                    session.language,
-                    stream=True
-                )
-                
-                full_response = ""
-                for line in response.iter_lines():
-                    if line:
-                        chunk_data = json.loads(line)
-                        message_chunk = chunk_data.get('message', {}).get('content', '')
-                        if message_chunk:
-                            full_response += message_chunk
-                            yield f"data: {json.dumps({'chunk': message_chunk})}\n\n"
-                
-                # Save tutor response
-                SessionMessage.objects.create(
-                    session=session,
-                    role='tutor',
-                    content=full_response,
-                    tokens_used=len(full_response.split())  # Rough estimate
-                )
-                
-                # Update session
-                session.message_count += 2
-                session.save()
-                
-                # Update metrics
-                metrics = session.metrics
-                metrics.total_tokens += len(full_response.split())
-                metrics.student_questions_count += 1
-                metrics.tutor_responses_count += 1
-                metrics.save()
-                
-            except Exception as e:
-                logger.error(f'Ollama error: {str(e)}')
-                yield f"data: {json.dumps({'error': 'Failed to get response from tutor'})}\n\n"
-        
-        return StreamingHttpResponse(event_stream(), content_type='text/event-stream')
+                for chunk in chat(messages=history, system_prompt=system_prompt, stream=True):
+                    full += chunk
+                    yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+            finally:
+                SessionMessage.objects.create(session=session, role="tutor", content=full)
+                session.message_count = session.messages.count()
+                session.save(update_fields=["message_count", "updated_at"])
+                yield f"data: {json.dumps({'done': True})}\n\n"
 
-    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
-    def close(self, request, pk=None):
-        session = self.get_object()
-        session.is_active = False
-        session.save()
-        return Response({'message': 'Session closed'}, status=status.HTTP_200_OK)
-
-    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
-    def active_sessions(self, request):
-        sessions = self.get_queryset().filter(is_active=True)
-        serializer = TutorSessionSerializer(sessions, many=True)
-        return Response(serializer.data)
+        response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
+        response["Cache-Control"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
+        return response

@@ -2,16 +2,21 @@ from rest_framework import serializers
 from .models import Quiz, Question, StudentQuizAttempt, QuizFeedback
 
 class QuestionSerializer(serializers.ModelSerializer):
+    # Expose options_json as 'options' so the frontend key matches
+    options = serializers.JSONField(source='options_json')
+
     class Meta:
         model = Question
-        fields = ('id', 'question_text', 'question_type', 'options_json', 'difficulty', 'marks', 'created_at')
-        read_only_fields = ('id', 'created_at')
-        # Don't expose correct_answer in list view for security
+        fields = ('id', 'question_text', 'question_type', 'options', 'difficulty', 'marks')
+        read_only_fields = ('id',)
+        # correct_answer intentionally omitted for security
 
 class QuestionDetailSerializer(serializers.ModelSerializer):
+    options = serializers.JSONField(source='options_json')
+
     class Meta:
         model = Question
-        fields = ('id', 'question_text', 'question_type', 'options_json', 'difficulty', 'marks', 'explanation')
+        fields = ('id', 'question_text', 'question_type', 'options', 'difficulty', 'marks', 'explanation')
         read_only_fields = ('id',)
 
 class QuizSerializer(serializers.ModelSerializer):
@@ -25,6 +30,10 @@ class QuizSerializer(serializers.ModelSerializer):
 
 class QuizDetailSerializer(QuizSerializer):
     questions = QuestionSerializer(many=True, read_only=True)
+
+    class Meta(QuizSerializer.Meta):
+        # Extend parent fields to include nested questions
+        fields = QuizSerializer.Meta.fields + ('questions',)
 
 class SubmitQuizSerializer(serializers.Serializer):
     answers_json = serializers.JSONField()

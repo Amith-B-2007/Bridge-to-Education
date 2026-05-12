@@ -4,6 +4,8 @@ import uuid
 
 SUBJECTS = [
     ('kannada', 'Kannada'),
+    ('hindi', 'Hindi'),
+    ('marathi', 'Marathi'),
     ('english', 'English'),
     ('maths', 'Mathematics'),
     ('science', 'Science'),
