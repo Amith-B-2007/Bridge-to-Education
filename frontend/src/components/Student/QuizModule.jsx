@@ -68,7 +68,7 @@ export const QuizModule = () => {
     return (
       <QuizTaker
         quiz={selectedQuiz}
-        onComplete={() => { setSelectedQuiz(null); fetchQuizzes(); }}
+        onComplete={() => { setSelectedQuiz(null); }}
         onBack={() => setSelectedQuiz(null)}
       />
     );
@@ -322,12 +322,14 @@ const QuizCard = ({ quiz, onStart, isPyq = false }) => {
 };
 
 const QuizTaker = ({ quiz, onComplete, onBack }) => {
+  const { user } = useAuth();
   const [questions, setQuestions] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState({});
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
+  const [startTime] = useState(Date.now());
 
   const style = SUBJECT_STYLES[quiz.subject] || SUBJECT_STYLES.maths;
 
@@ -335,10 +337,15 @@ const QuizTaker = ({ quiz, onComplete, onBack }) => {
 
   const loadQuiz = async () => {
     try {
-      const res = await api.get(`/quizzes/${quiz.id}/`);
-      setQuestions(res.data.questions || []);
+      const q = await getQuizById(quiz.id);
+      if (q && q.questions) {
+        setQuestions(q.questions);
+      } else {
+        console.warn('No questions found for quiz', quiz.id);
+        setQuestions([]);
+      }
     } catch (e) {
-      console.error(e);
+      console.error('Error loading quiz:', e);
     } finally {
       setLoading(false);
     }
@@ -349,10 +356,40 @@ const QuizTaker = ({ quiz, onComplete, onBack }) => {
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
-      const res = await api.post(`/quizzes/${quiz.id}/submit/`, { answers_json: answers });
-      setResult(res.data);
+      // Calculate correct answers
+      let correctCount = 0;
+      questions.forEach(q => {
+        if (answers[q.id] === q.correctAnswer) {
+          correctCount++;
+        }
+      });
+
+      const percentage = (correctCount / questions.length) * 100;
+      const timeSpent = Math.floor((Date.now() - startTime) / 1000); // seconds
+
+      // Record attempt in Firestore
+      await recordQuizAttempt(
+        quiz.id,
+        user.uid || user.id,
+        user.displayName || user.name || 'Student',
+        correctCount,
+        questions.length,
+        timeSpent
+      );
+
+      // Calculate passing score (default 40% or from quiz.passingPercentage)
+      const passingPercentage = quiz.passing_percentage || 40;
+      const passed = percentage >= passingPercentage;
+
+      // Set result for display
+      setResult({
+        percentage: Math.round(percentage),
+        score: correctCount,
+        total_marks: questions.length,
+        passed,
+      });
     } catch (e) {
-      console.error(e);
+      console.error('Error submitting quiz:', e);
       alert('Failed to submit quiz. Please try again.');
     } finally {
       setSubmitting(false);

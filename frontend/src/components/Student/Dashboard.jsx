@@ -1,31 +1,57 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { offlineManager } from '../../utils/offline';
-import api from '../../utils/api';
+import { subscribeToStudentProgress, subscribeToQuizzes } from '../../services/firestoreService';
 
 export const Dashboard = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [dashboardData, setDashboardData] = useState(null);
+  const [progressData, setProgressData] = useState({});
+  const [quizStats, setQuizStats] = useState({ totalAttempts: 0, averageScore: 0 });
   const [loading, setLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   useEffect(() => {
-    fetchDashboard();
-    offlineManager.addListener(setIsOnline);
-  }, []);
+    if (!user) return;
+    
+    // Subscribe to progress data
+    const unsubscribeProgress = subscribeToStudentProgress(
+      user.uid || user.id,
+      (data) => {
+        if (data) {
+          const bySubject = {};
+          data.forEach(p => {
+            const subject = p.subject;
+            if (!bySubject[subject]) {
+              bySubject[subject] = { scores: [], avg: 0 };
+            }
+            bySubject[subject].scores.push(p.score || 0);
+          });
+          
+          // Calculate averages
+          Object.keys(bySubject).forEach(subject => {
+            const scores = bySubject[subject].scores;
+            bySubject[subject].avg = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length || 0);
+          });
+          
+          setProgressData(bySubject);
+        }
+        setLoading(false);
+      }
+    );
 
-  const fetchDashboard = async () => {
-    try {
-      const response = await api.get('/users/dashboard/');
-      setDashboardData(response.data);
-    } catch (error) {
-      console.error('Error:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    // Track online status
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      unsubscribeProgress?.();
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [user]);
 
   if (loading) {
     return (
@@ -90,19 +116,21 @@ export const Dashboard = () => {
           <div style={{backgroundColor: '#fff', padding: '20px', borderRadius: '8px', border: '1px solid #eee'}}>
             <p style={{color: '#666', fontSize: '0.9rem', marginBottom: '12px'}}>Your Grade</p>
             <p style={{fontSize: '2.5rem', fontWeight: 700, color: '#0f3460'}}>
-              {dashboardData?.student?.grade || user?.grade || '-'}
+              {user?.grade || '-'}
             </p>
           </div>
           <div style={{backgroundColor: '#fff', padding: '20px', borderRadius: '8px', border: '1px solid #eee'}}>
-            <p style={{color: '#666', fontSize: '0.9rem', marginBottom: '12px'}}>Quizzes Taken</p>
+            <p style={{color: '#666', fontSize: '0.9rem', marginBottom: '12px'}}>Learning Activities</p>
             <p style={{fontSize: '2.5rem', fontWeight: 700, color: '#00a8e8'}}>
-              {dashboardData?.total_quiz_attempts || 0}
+              {Object.keys(progressData).length}
             </p>
           </div>
           <div style={{backgroundColor: '#fff', padding: '20px', borderRadius: '8px', border: '1px solid #eee'}}>
-            <p style={{color: '#666', fontSize: '0.9rem', marginBottom: '12px'}}>AI Sessions</p>
+            <p style={{color: '#666', fontSize: '0.9rem', marginBottom: '12px'}}>Average Score</p>
             <p style={{fontSize: '2.5rem', fontWeight: 700, color: '#00a8e8'}}>
-              {dashboardData?.ai_tutor_sessions || 0}
+              {Object.keys(progressData).length > 0 
+                ? Math.round(Object.values(progressData).reduce((sum, s) => sum + s.avg, 0) / Object.keys(progressData).length)
+                : '-'}%
             </p>
           </div>
         </div>
@@ -216,40 +244,46 @@ export const Dashboard = () => {
         {/* Subject Progress */}
         <div>
           <h2 style={{fontSize: '1.3rem', fontWeight: 700, color: '#0f3460', marginBottom: '16px'}}>Your Progress</h2>
-          <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px'}}>
-            {subjects.map((subject) => {
-              const data = dashboardData?.subjects?.[subject] || { avg_score: 0 };
-              return (
-                <div key={subject} style={{
-                  backgroundColor: '#fff',
-                  padding: '16px',
-                  borderRadius: '8px',
-                  border: '1px solid #eee'
-                }}>
-                  <p style={{fontWeight: 600, color: '#333', marginBottom: '12px'}}>{subject}</p>
-                  <p style={{fontSize: '1.8rem', fontWeight: 700, color: '#00a8e8', marginBottom: '8px'}}>
-                    {data.avg_score}%
-                  </p>
-                  <div style={{
-                    width: '100%',
-                    height: '6px',
-                    backgroundColor: '#eee',
-                    borderRadius: '3px',
-                    overflow: 'hidden'
+          {Object.keys(progressData).length === 0 ? (
+            <div style={{backgroundColor: '#fff', padding: '32px', borderRadius: '8px', border: '1px solid #eee', textAlign: 'center'}}>
+              <p style={{color: '#999', fontSize: '1rem'}}>Start taking quizzes to see your progress by subject!</p>
+            </div>
+          ) : (
+            <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px'}}>
+              {subjects.map((subject) => {
+                const data = progressData[subject] || { avg: 0 };
+                return (
+                  <div key={subject} style={{
+                    backgroundColor: '#fff',
+                    padding: '16px',
+                    borderRadius: '8px',
+                    border: '1px solid #eee'
                   }}>
-                    <div
-                      style={{
-                        height: '100%',
-                        backgroundColor: '#00a8e8',
-                        width: `${data.avg_score}%`,
-                        transition: 'width 0.3s'
-                      }}
-                    />
+                    <p style={{fontWeight: 600, color: '#333', marginBottom: '12px'}}>{subject}</p>
+                    <p style={{fontSize: '1.8rem', fontWeight: 700, color: '#00a8e8', marginBottom: '8px'}}>
+                      {data.avg}%
+                    </p>
+                    <div style={{
+                      width: '100%',
+                      height: '6px',
+                      backgroundColor: '#eee',
+                      borderRadius: '3px',
+                      overflow: 'hidden'
+                    }}>
+                      <div
+                        style={{
+                          height: '100%',
+                          backgroundColor: '#00a8e8',
+                          width: `${data.avg}%`,
+                          transition: 'width 0.3s'
+                        }}
+                      />
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Offline Mode Banner */}
@@ -263,24 +297,8 @@ export const Dashboard = () => {
           }}>
             <p style={{color: '#856404', fontWeight: 600, marginBottom: '12px'}}>📴 You're currently offline</p>
             <p style={{color: '#856404', fontSize: '0.9rem', marginBottom: '12px'}}>
-              You can still access cached resources and quizzes
+              You can still access cached resources and your progress is saved locally
             </p>
-            <button
-              onClick={() => navigate('/offline/resources')}
-              style={{
-                padding: '8px 16px',
-                backgroundColor: '#ffc107',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontWeight: 500,
-                color: '#000',
-                marginRight: '8px',
-                fontSize: '0.9rem'
-              }}
-            >
-              Browse Offline Resources
-            </button>
           </div>
         )}
       </main>

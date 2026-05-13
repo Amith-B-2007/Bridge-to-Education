@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import api from '../../utils/api';
+import { createDoubt, subscribeToDoubts, subscribeToChatMessages, sendChatMessage } from '../../services/firestoreService';
 
 const SUBJECTS = ['Kannada', 'Hindi', 'Marathi', 'English', 'Maths', 'Science', 'Social Science', 'Schemes & Scholarships'];
 
@@ -23,64 +23,64 @@ export const DoubtChat = () => {
   const [sending, setSending] = useState(false);
   const [newDoubt, setNewDoubt] = useState({ subject: 'Maths', description: '' });
   const messagesEndRef = useRef(null);
-  const wsRef = useRef(null);
 
-  useEffect(() => { fetchSessions(); }, []);
+  useEffect(() => { fetchSessions(); }, [user]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   useEffect(() => {
+    let unsubscribe;
     if (activeSession) {
-      fetchMessages(activeSession.id);
-      connectWebSocket(activeSession.id);
+      unsubscribe = subscribeToChatMessages(activeSession.id, (msgs) => {
+        setMessages(msgs || []);
+      });
     }
-    return () => { wsRef.current?.close(); };
+    return () => unsubscribe?.();
   }, [activeSession?.id]);
 
   const fetchSessions = async () => {
     setLoading(true);
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     try {
-      const res = await api.get('/doubts/sessions/');
-      const data = res.data.results || res.data || [];
-      setSessions(data);
-      if (data.length > 0 && !activeSession) setActiveSession(data[0]);
-    } catch (e) { console.error(e); }
-    finally { setLoading(false); }
-  };
-
-  const fetchMessages = async (id) => {
-    try {
-      const res = await api.get(`/doubts/sessions/${id}/`);
-      setMessages(res.data.messages || []);
-    } catch (e) { setMessages([]); }
-  };
-
-  const connectWebSocket = (sessionId) => {
-    wsRef.current?.close();
-    const token = localStorage.getItem('access_token');
-    const wsHost = import.meta.env.VITE_WS_URL || 'ws://localhost:8000';
-    try {
-      wsRef.current = new WebSocket(`${wsHost}/ws/doubts/${sessionId}/?token=${token}`);
-      wsRef.current.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === 'message') {
-          setMessages(prev => [...prev, { id: data.message_id, sender_name: data.sender, message: data.text, created_at: data.timestamp }]);
+      const unsubscribe = subscribeToDoubts(
+        user.uid || user.id,
+        (data) => {
+          setSessions(data || []);
+          if (data.length > 0 && !activeSession) setActiveSession(data[0]);
+          setLoading(false);
         }
-      };
-    } catch (e) { console.error('WebSocket failed:', e); }
+      );
+      return () => unsubscribe?.();
+    } catch (e) { 
+      console.error('Error fetching doubts:', e);
+      setLoading(false);
+    }
   };
 
   const createSession = async () => {
     if (!newDoubt.description.trim()) return;
     try {
-      const res = await api.post('/doubts/sessions/', newDoubt);
-      setSessions(prev => [res.data, ...prev]);
-      setActiveSession(res.data);
+      const doubtData = {
+        studentId: user.uid || user.id,
+        studentName: user.displayName || user.name || 'Student',
+        subject: newDoubt.subject,
+        description: newDoubt.description,
+        status: 'open',
+      };
+      const newSession = await createDoubt(doubtData);
+      setSessions(prev => [newSession, ...prev]);
+      setActiveSession(newSession);
       setShowCreateModal(false);
       setNewDoubt({ subject: 'Maths', description: '' });
-    } catch (e) { alert('Failed to create doubt session'); }
+    } catch (e) { 
+      console.error('Error creating doubt:', e);
+      alert('Failed to create doubt session');
+    }
   };
 
   const sendMessage = async (e) => {
@@ -90,13 +90,17 @@ export const DoubtChat = () => {
     setInputMessage('');
     setSending(true);
     try {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ message: text }));
-      } else {
-        const res = await api.post(`/doubts/sessions/${activeSession.id}/messages/`, { message: text });
-        setMessages(prev => [...prev, res.data]);
-      }
-    } catch (e) { setInputMessage(text); }
+      await sendChatMessage(
+        activeSession.id,
+        user.uid || user.id,
+        user.displayName || user.name || 'Student',
+        text
+      );
+    } catch (e) { 
+      console.error('Error sending message:', e);
+      setInputMessage(text);
+      alert('Failed to send message');
+    }
     finally { setSending(false); }
   };
 
@@ -204,17 +208,17 @@ export const DoubtChat = () => {
                   <p style={{ fontSize: 14 }}>No messages yet — start the conversation!</p>
                 </div>
               ) : messages.map((msg, i) => {
-                const isMe = msg.sender_name === user?.username;
+                const isMe = msg.senderName === (user?.displayName || user?.name || user?.username);
                 return (
                   <div key={msg.id || i} style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start' }}>
                     {!isMe && (
                       <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: '#64748b', flexShrink: 0, marginRight: 8, alignSelf: 'flex-end' }}>
-                        {(msg.sender_name || 'T')[0].toUpperCase()}
+                        {(msg.senderName || 'T')[0].toUpperCase()}
                       </div>
                     )}
                     <div style={{ maxWidth: '65%' }}>
                       {!isMe && (
-                        <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 3, paddingLeft: 4 }}>{msg.sender_name}</div>
+                        <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 3, paddingLeft: 4 }}>{msg.senderName}</div>
                       )}
                       <div style={{
                         padding: '10px 14px',
@@ -231,7 +235,7 @@ export const DoubtChat = () => {
                         {msg.message}
                       </div>
                       <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 3, textAlign: isMe ? 'right' : 'left', paddingLeft: 4 }}>
-                        {msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                        {msg.timestamp ? new Date(msg.timestamp.toDate ? msg.timestamp.toDate() : msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                       </div>
                     </div>
                   </div>
